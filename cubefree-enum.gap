@@ -6,11 +6,11 @@
 ### This file implements Theorem 4.11 of the paper
 ###
 ###   The number of groups of cubefree order
-###   Heiko Dietrich
-###   arxiv: (soon)
+###   Heiko Dietrich, David Jefferies
+###   arxiv: https://arxiv.org/abs/2608.18815
 ###
 ### This final implementation has been completely rewritten and improved by the LLM Claude Opus 5.
-### This implementation has been cross-checked extensively, see Section 5.2.
+### This implementation has been cross-checked extensively, see Section 6.3.
 ###
 ###
 ### The main function is
@@ -20,7 +20,7 @@
 ### which runs over the three sums  s in S(n),  d | Q(n/s),  l | n/(sd)  of the
 ### theorem and, for each triple (s,d,l), evaluates gnu_Phi(n/(sd),l) by one of
 ###
-###    cf_gnu_phi_0(n,l)       gnu_Phi(n,l) if t = v_2(n/l) = 0    Corollary 3.10
+###    cf_gnu_phi_0(n,l)       gnu_Phi(n,l) if t = v_2(n/l) = 0    Corollary 3.11
 ###    cf_gnu_phi_1(n,l)       gnu_Phi(n,l) if t = v_2(n/l) = 1    Proposition 4.7
 ###    cf_gnu_phi_2(n,l)       gnu_Phi(n,l) if t = v_2(n/l) = 2    Proposition 4.10
 ###
@@ -33,23 +33,30 @@
 ###
 ### with their own cache, emptied by cf_ss_clearcache().
 ###
+### Section 8 adds the count
+###
+###    NumberCubefreeCGroups(n)                gnu_cyc(n)
+###
+### of the groups all of whose Sylow subgroups are cyclic; it needs no cache of
+### its own, since it reuses the sets U(p,e,L) of Sections 2 and 5.
+###
 ### usage:  Read("cubefree-enum.gap");
 ###         NumberCubefreeGroups(2^2*3^2*5^2*7^2);
 ###
 ### Before the sums of Theorem 4.11 are evaluated, n is split by the coprime
-### reduction of Remark 3.15: the prime divisors of n are the vertices of the
+### reduction of Remark 3.16: the prime divisors of n are the vertices of the
 ### interaction graph Gamma(n) (cf_edge, cf_components) and gnu(n) is the product
 ### of the gnu(n_C) over the connected components C of Gamma(n). The evaluation of
 ### Theorem 4.11 itself happens in cf_gnu_connected.
 ###
-### The functions cf_gnu_phi_t follow the statements of Corollary 3.10 and
+### The functions cf_gnu_phi_t follow the statements of Corollary 3.11 and
 ### Propositions 4.7 and 4.10 line by line, but they evaluate them as described in
-### Section 5.1: the sets U(p,e,L) of (3.2) depend neither on s nor on d
+### Section 6.2: the sets U(p,e,L) of (3.2) depend neither on s nor on d
 ### or l, so they are computed once and cached (cf_Udata); only the integers
 ### (j,d,d^+,d^-) attached to a U ever reach the local numbers, so the U with
 ### equal data are merged and counted with a multiplicity; a pair (l,L) whose term
 ### vanishes for a local reason is recognised before any projection tuple is built
-### (cf_feasible); and the products of Lemmas 3.11, 3.12 and A.1 are accumulated
+### (cf_feasible); and the products of Lemmas 3.12, 3.13 and A.1 are accumulated
 ### in a single pass over the columns, with c,z,g,r read off lookup tables
 ### (cf_KqtB, cf_KqH).
 ###
@@ -86,7 +93,7 @@ end;
 #####################################################
 ## input: primes p <> q with p^ep || n and q^eq || n
 ## output: true iff p and q are joined in the interaction graph Gamma(n) of
-##         Remark 3.15, that is, iff p | q^i-1 for some i <= eq, or
+##         Remark 3.16, that is, iff p | q^i-1 for some i <= eq, or
 ##         q | p^j-1 for some j <= ep
 ##
 cf_edge := function(p, ep, q, eq)
@@ -101,7 +108,7 @@ end;
 ## input: cubefree n
 ## output: the list of the n_C, where C runs over the connected components of
 ##         the interaction graph Gamma(n) and n_C is the C-part of n; the n_C
-##         are pairwise coprime with product n, and Remark 3.15 gives
+##         are pairwise coprime with product n, and Remark 3.16 gives
 ##         gnu(n) = product of the gnu(n_C).  The components are found by label
 ##         propagation on the (at most 15 for n < 10^18) prime divisors of n.
 ##
@@ -187,8 +194,8 @@ end;
 ## type of Definition 4.6, delta = 1 iff 4 | p-1, and loc[k] = rec(j,d,dp,dm)
 ## holds the data of the Sylow q-subgroup U_q for q = L.primes[k]: its order is
 ## q^j, its rank is d, and (dp,dm) are the ranks of the eigenspaces of the
-## generator theta_U of Theta(U) as in Lemma 3.12.  These integers are all that
-## the formulas of Lemmas 3.11, 3.12 and A.1 ever use.
+## generator theta_U of Theta(U) as in Lemma 3.13.  These integers are all that
+## the formulas of Lemmas 3.12, 3.13 and A.1 ever use.
 ##
 
 ### The subgroups of D(p)_q are stored as records rec(j,d,gens) of order q^j and
@@ -323,7 +330,7 @@ end;
 ## the key is a flat list of integers, with the Sylow data [1,1], [2,1], [2,2]
 ## of L encoded as 3, 5, 6
 ##
-## Section 5.1: U(p,e,L) depends only on (p,e,L) -- not on the simple factor s,
+## Section 6.2: U(p,e,L) depends only on (p,e,L) -- not on the simple factor s,
 ## the Frattini order d or the socle order l -- and only the record
 ## rec(theta,typ,delta,loc) of a U is ever used, so equal records are merged.
 ##
@@ -356,7 +363,7 @@ end;
 ## output: false if the term of (l,L) vanishes because some prime q dividing |L|
 ##         cannot be realised in any column, true otherwise
 ##
-## Section 5.1: for a column (p,e) the q-part of a projection U is cyclic of
+## Section 6.2: for a column (p,e) the q-part of a projection U is cyclic of
 ## order at most q^mj with mj = min(v_q(p-1 resp. p^2-1), largest cyclic quotient
 ## of L_q), and it has rank 2 only inside D(p)_q, which needs q | p-1.  Since
 ## every K_q is isomorphic to L_q and projects onto all these q-parts, L_q must
@@ -390,7 +397,7 @@ end;
 ######################################################
 ##
 ## 3.  The local numbers |K_q(U,L)^theta| and |K_q(U,L)^H|
-##     Lemmas 3.11, 3.12 and A.1
+##     Lemmas 3.12, 3.13 and A.1
 ##
 
 #####################################################
@@ -410,9 +417,9 @@ end;
 ## input: code typ of L_q (1,2,3 for C_q, C_{q^2}, C_q^2), table tb of cf_tab,
 ##        projection tuple prof, index k of the prime q
 ## output: the theta-independent factor of |K_q(U,L)^theta|, that is, the value
-##         |K_q(U,L)| of Lemma 3.11
+##         |K_q(U,L)| of Lemma 3.12
 ##
-## The products over the columns in Lemma 3.11 do not involve theta and are the
+## The products over the columns in Lemma 3.12 do not involve theta and are the
 ## only place where large integers are multiplied, so they are formed once per
 ## projection tuple rather than once for each of the |Theta(U)| sign vectors.
 ##
@@ -449,7 +456,7 @@ end;
 #####################################################
 ## input: as cf_KqtBase, with theta as a 0/1 vector vx over the columns and the
 ##        value base of cf_KqtBase for the same (prof,k)
-## output: |K_q(U,L)^theta| of Lemma 3.12
+## output: |K_q(U,L)^theta| of Lemma 3.13
 ##
 cf_KqtB := function(typ, tb, prof, vx, k, base)
 local m, i, u, pzp, pzm, pcp, pcm, dp, dm;
@@ -565,7 +572,7 @@ end;
 
 ######################################################
 ##
-## Table 2 of the paper: P is one of "1", "C2", "C4", "V4"; for P = "C4" the automorphism
+## Table 3 of the paper: P is one of "1", "C2", "C4", "V4"; for P = "C4" the automorphism
 ## al = 0 is the identity and al = 1 is inversion, and for P = "V4" the classes
 ## al = 0,1,2 are the identity, a transposition and a 3-cycle
 ##
@@ -717,7 +724,7 @@ end;
 
 ######################################################
 ##
-## 5.  The three cases of gnu_Phi(n,l):  Corollary 3.10, Propositions 4.7 and 4.10
+## 5.  The three cases of gnu_Phi(n,l):  Corollary 3.11, Propositions 4.7 and 4.10
 ##
 ## In all three functions n is cubefree, l | n, and nu = n/l = 2^t nu_0 with nu_0
 ## odd; the caller has checked that t = v_2(nu) is 0, 1 or 2, respectively.  The
@@ -731,7 +738,7 @@ end;
 
 #####################################################
 ## input: cubefree n and a divisor l of n with v_2(n/l) = 0
-## output: gnu_Phi(n,l), by Corollary 3.10
+## output: gnu_Phi(n,l), by Corollary 3.11
 ##
 cf_gnu_phi_0 := function(n, l)
 local nu, cols, tot, L, Us, tabs, typs, nq, tup, prof, mult, m, R, r, msk, vx,
@@ -946,7 +953,7 @@ end;
 ## input: a cubefree integer n >= 1
 ## output: gnu(n), the number of isomorphism types of groups of order n
 ##
-## By Remark 3.15, every group of order n is the direct product of its Hall
+## By Remark 3.16, every group of order n is the direct product of its Hall
 ## C-subgroups, where C runs over the connected components of Gamma(n); so gnu is
 ## multiplicative over the n_C returned by cf_components. For a connected Gamma(n)
 ## (in particular for every even n) this is just one call of cf_gnu_connected.
@@ -999,13 +1006,13 @@ end;
 ##         trivial at the columns of type (4); after (i) the group Theta(U) is
 ##         generated by the columns of type (4), so this just means psi = 1, see
 ##         cf_ss_gnu_phi_1 and cf_ss_gnu_phi_2;
-##   (iii) removes one class from the number rho(C_4,alpha) of Table 2 when
+##   (iii) removes one class from the number rho(C_4,alpha) of Table 3 when
 ##         delta = 0, see cf_ss_rho.  For t = 1 this condition is vacuous, since
 ##         every involution of GL_2(p) is diagonalisable, so cf_Atab is reused
 ##         unchanged; for t = 0 there is no E at all.
 ##
 ## All three conditions are invariant under conjugation by N(U), so the Burnside
-## averages over Theta(U) in Corollary 3.10 and Propositions 4.7 and 4.10 are
+## averages over Theta(U) in Corollary 3.11 and Propositions 4.7 and 4.10 are
 ## taken over the restricted sets exactly as before.
 ##
 
@@ -1367,3 +1374,256 @@ NumberCubefreeSupersolvableGroups := function(n)
    return Product(cf_components(n), cf_ss_gnu_connected);
 end;
 
+
+######################################################
+##
+## 8.  Restricted count: groups with cyclic Sylow subgroups
+##
+##    NumberCubefreeCGroups(n)   gnu_cyc(n)
+##
+## A group all of whose Sylow subgroups are cyclic is a C-group (also called a
+## Z-group); by Hoelder, Burnside and Zassenhaus such a group is metacyclic, in
+## particular solvable.  As in Section 7 the count is obtained by restricting the
+## objects that the sums of Theorem 4.11 run over, so that Sections 1-7 remain
+## untouched.  It is again multiplicative over the components of Gamma(n), since
+## a direct product of groups of coprime orders is a C-group if and only if all
+## of its factors are.
+##
+## Let G be a group of cubefree order n = s*d*l*nu counted by the term (s,d,l,L)
+## of Theorem 4.11: s = |A| for the simple direct factor A of G, d = |Phi(G)|,
+## l = |Soc(G/Phi(G))| and nu = |K| for the socle complement K of G/Phi(G), whose
+## Sylow 2-subgroup is E of order 2^t and whose odd part is isomorphic to L.
+## Then G is a C-group if and only if
+##
+##   (a) s = 1;
+##   (b) l is squarefree;
+##   (c) gcd(l,nu) = 1;
+##   (d) every Sylow subgroup of K is cyclic, that is, L has no Sylow subgroup of
+##       rank 2, and E is not C_2 x C_2.
+##
+## For the necessity: (a) the cubefree simple groups of cf_S are the PSL(2,p) with
+## 4 || |PSL(2,p)|, and their Sylow 2-subgroups are dihedral, hence C_2 x C_2;
+## (b) if p^2 | l then Soc(G/Phi(G)) contains C_p x C_p; (c) if p | l and p | nu
+## then e_i = 1 for the column of p by (b), so the Sylow p-subgroup K_p of K has
+## trivial image in Aut(Soc_p) = GL_1(p) = C_{p-1}, and the Sylow p-subgroup of G
+## is Soc_p x K_p = C_p x C_p; (d) if p^2 | nu then p divides neither d nor l by
+## (c), so the Sylow p-subgroup of G is the one of K.
+##
+## For the sufficiency let p^2 | n.  If p | d, then the Sylow p-subgroup of G is
+## cyclic for every G counted by the term, and no condition on d is needed: the
+## p-part N of Phi(G) is normal in G of order p, and if the Sylow p-subgroup P of
+## G were C_p x C_p, then N would have a complement in P and hence, by Gaschuetz's
+## theorem, in G, contradicting N <= Phi(G).  If p does not divide d, then p^2
+## divides l*nu, so p^2 | nu by (b) and (c), and the Sylow p-subgroup of G is the
+## one of K, which is cyclic by (d).
+##
+## Accordingly:
+##
+##   (a)   drops the outer sum over s, as in cf_solv_gnu_connected;
+##   (b),(c) restrict the divisors l, see cf_c_gnu_connected;
+##   (d)   lets L run over cf_c_A(nu) instead of cf_A(nu), and leaves only the
+##         summand E = C_4 of Proposition 4.10, see cf_c_gnu_phi_0/1/2.
+##
+## No further restriction of the sets U(p,e,L) is needed, and no new cache: by (b)
+## every column has e_i = 1, so every U in U(p,1,L) has Theta(U) = 1 and column
+## type (1), or type (0) for p = 2.  The loops over Theta(U) below are kept as in
+## Sections 5 and 7; they simply run over the trivial group.
+##
+
+#####################################################
+## input: cubefree n
+## output: the abelian groups of order n all of whose Sylow subgroups are cyclic,
+##         in the format of cf_A; this is the cyclic group of order n only
+##
+cf_c_A := function(n)
+local facs;
+   facs := Collected(FactorsInt(n));
+   if facs = [[1,1]] then return [ rec(primes:=[], sylow:=[]) ]; fi;   # n = 1
+   return [ rec(primes := List(facs, x-> x[1]),
+                sylow  := List(facs, x-> [x[2],1])) ];
+end;
+
+#####################################################
+## input: cubefree n and a squarefree divisor l of n with v_2(n/l) = 0
+## output: the C-group part of gnu_Phi(n,l); this is cf_gnu_phi_0 with L
+##         restricted to the cyclic group of order nu
+##
+cf_c_gnu_phi_0 := function(n, l)
+local nu, cols, tot, L, Us, tabs, typs, nq, tup, prof, mult, m, R, r, msk, vx,
+      prod, k, bs, it, i;
+   nu  := n/l;
+   if l = 1 then cols := []; else cols := Collected(FactorsInt(l)); fi;
+   tot := 0;
+   for L in cf_c_A(nu) do                                   # L in A(nu), cyclic
+      if not cf_feasible(cols, L) then continue; fi;
+      Us   := List(cols, x-> cf_Udata(x[1], x[2], L));
+      nq   := Length(L.primes);
+      tabs := List(L.primes, cf_tab);
+      typs := List(L.sylow, x-> Position([[1,1],[2,1],[2,2]], x));
+      m    := Length(cols);
+      prof := EmptyPlist(m);
+      it   := IteratorOfCartesianProduct(Us);
+      while not IsDoneIterator(it) do
+         tup  := NextIterator(it);
+         mult := 1;
+         for i in [1..m] do prof[i] := tup[i][1]; mult := mult * tup[i][2]; od;
+         R    := Filtered([1..m], i-> prof[i].theta = 2);
+         r    := Length(R);
+         bs := List([1..nq], k-> cf_KqtBase(typs[k], tabs[k], prof, k));
+         vx := ListWithIdenticalEntries(m, 0);
+         for msk in [0..2^r-1] do                           # theta in Theta(U)
+            for k in [1..r] do vx[R[k]] := QuoInt(msk, 2^(k-1)) mod 2; od;
+            prod := 1;
+            for k in [1..nq] do                             # q | nu
+               prod := prod * cf_KqtB(typs[k], tabs[k], prof, vx, k, bs[k]);
+               if prod = 0 then break; fi;
+            od;
+            if not prod = 0 then
+               tot := tot + mult * prod / 2^r;              # 1/|Theta(U)|
+            fi;
+         od;
+      od;
+   od;
+   return tot;
+end;
+
+#####################################################
+## input: cubefree n and a squarefree divisor l of n with v_2(n/l) = 1
+## output: the C-group part of gnu_Phi(n,l); this is cf_gnu_phi_1 with L
+##         restricted to the cyclic group of order nu_0
+##
+cf_c_gnu_phi_1 := function(n, l)
+local nu0, cols, tot, L, Us, tabs, typs, nq, tup, prof, mult, m, R, r, vx, vp,
+      A, h, k, it, i, bs, lms, mx, mp;
+   nu0 := n/(2*l);
+   if l = 1 then cols := []; else cols := Collected(FactorsInt(l)); fi;
+   tot := 0;
+   for L in cf_c_A(nu0) do                                  # L in A(nu_0), cyclic
+      if not cf_feasible(cols, L) then continue; fi;
+      Us   := List(cols, x-> cf_Udata(x[1], x[2], L));
+      tabs := List(L.primes, cf_tab);
+      typs := List(L.sylow, x-> Position([[1,1],[2,1],[2,2]], x));
+      nq   := Length(typs);
+      m    := Length(cols);
+      prof := EmptyPlist(m);
+      it   := IteratorOfCartesianProduct(Us);
+      while not IsDoneIterator(it) do
+         tup  := NextIterator(it);
+         mult := 1;
+         for i in [1..m] do prof[i] := tup[i][1]; mult := mult * tup[i][2]; od;
+         R    := Filtered([1..m], i-> prof[i].theta = 2);
+         r    := Length(R);
+         bs   := List([1..nq], k-> cf_KqtBase(typs[k], tabs[k], prof, k));
+         vx   := ListWithIdenticalEntries(m, 0);            # reused for every xi
+         vp   := ListWithIdenticalEntries(m, 0);            # reused for every psi
+         lms  := ListWithIdenticalEntries(m, 0);            # column characters
+         for mx in [0..2^r-1] do                            # xi in Theta(U)
+            for k in [1..r] do vx[R[k]] := QuoInt(mx, 2^(k-1)) mod 2; od;
+            for mp in [0..2^r-1] do                         # psi in Theta(U)
+               for k in [1..r] do vp[R[k]] := QuoInt(mp, 2^(k-1)) mod 2; od;
+               A := Product([1..m], i-> cf_Atab(prof[i].typ, vx[i], vp[i]));
+               if mp = 0 then A := A - 1; fi;               # - Delta_{psi=1}
+               if not A = 0 then
+                  for i in [1..m] do lms[i] := vx[i] + 2*vp[i]; od;
+                  h := cf_KUL(prof, typs, tabs, lms, bs);
+                  tot := tot + mult * A * h / 2^r;          # 1/|Theta(U)|
+               fi;
+            od;
+         od;
+      od;
+   od;
+   return tot;
+end;
+
+#####################################################
+## input: cubefree n and a squarefree divisor l of n with v_2(n/l) = 2
+## output: the C-group part of gnu_Phi(n,l); this is cf_gnu_phi_2 with L
+##         restricted to the cyclic group of order nu_0 and with E = C_4, since
+##         E is the Sylow 2-subgroup of G here (l and d are odd)
+##
+cf_c_gnu_phi_2 := function(n, l)
+local nu0, cols, tot, L, Us, tabs, typs, nq, tup, prof, mult, m, R, r,
+      nal, al, vx, P1, h, w, k, it, i, bs, tt, lms, mx, mp;
+   nu0 := n/(4*l);
+   if l = 1 then cols := []; else cols := Collected(FactorsInt(l)); fi;
+   tot := 0;
+   for L in cf_c_A(nu0) do                                  # L in A(nu_0), cyclic
+      if not cf_feasible(cols, L) then continue; fi;
+      Us   := List(cols, x-> cf_Udata(x[1], x[2], L));
+      tabs := List(L.primes, cf_tab);
+      typs := List(L.sylow, x-> Position([[1,1],[2,1],[2,2]], x));
+      nq   := Length(typs);
+      m    := Length(cols);
+      prof := EmptyPlist(m);
+      it   := IteratorOfCartesianProduct(Us);
+      while not IsDoneIterator(it) do
+         tup  := NextIterator(it);
+         mult := 1;
+         for i in [1..m] do prof[i] := tup[i][1]; mult := mult * tup[i][2]; od;
+         R    := Filtered([1..m], i-> prof[i].theta = 2);
+         r    := Length(R);
+         bs   := List([1..nq], k-> cf_KqtBase(typs[k], tabs[k], prof, k));
+         tt   := List(prof, cf_Ttab);                       # tables for cf_h
+         lms  := ListWithIdenticalEntries(m, 0);            # column characters
+         vx   := ListWithIdenticalEntries(m, 0);            # reused for every xi
+         P1   := ListWithIdenticalEntries(m, 0);            # reused for every psi
+         nal  := 2;                                         # |Aut(C_4)|
+         for mx in [0..2^r-1] do                            # xi in Theta(U)
+            for k in [1..r] do vx[R[k]] := QuoInt(mx, 2^(k-1)) mod 2; od;
+            for al in [0,1] do                              # alpha in Aut(C_4)
+               for mp in [0..2^r-1] do                      # psi
+                  for k in [1..r] do
+                     P1[R[k]] := QuoInt(mp, 2^(k-1)) mod 2;
+                  od;
+                  h := cf_h("C4", tt, vx, al, 0, [P1]);
+                  if not h = 0 then
+                     for i in [1..m] do lms[i] := vx[i] + 2*P1[i]; od;
+                     w := cf_KUL(prof, typs, tabs, lms, bs);
+                     tot := tot + mult * h * w / (2^r * nal);
+                  fi;
+               od;
+            od;
+         od;
+      od;
+   od;
+   return tot;
+end;
+
+#####################################################
+## input: a cubefree integer n >= 1 whose interaction graph Gamma(n) is connected
+## output: gnu_cyc(n), evaluated by the restricted sums of Theorem 4.11: the
+##         summand s = 1, and only the socle orders l that are squarefree and
+##         coprime to the order nu = n/(d*l) of the socle complement
+##
+cf_c_gnu_connected := function(n)
+local tot, d, l, t;
+   tot := 0;
+   for d in DivisorsInt(cf_Q(n)) do                  # d = order of the Frattini subgroup
+      for l in DivisorsInt(n/d) do                   # l = order of the socle
+         if not cf_Q(l) = 1 then continue; fi;       # (b) l squarefree
+         if not Gcd(l, n/(d*l)) = 1 then continue; fi;   # (c) gcd(l,nu) = 1
+         t := cf_vq(n/(d*l), 2);
+         if   t = 0 then tot := tot + cf_c_gnu_phi_0(n/d, l);
+         elif t = 1 then tot := tot + cf_c_gnu_phi_1(n/d, l);
+         else            tot := tot + cf_c_gnu_phi_2(n/d, l);
+         fi;
+      od;
+   od;
+   return tot;
+end;
+
+#####################################################
+## input: a cubefree integer n >= 1
+## output: gnu_cyc(n), the number of groups of order n all of whose Sylow
+##         subgroups are cyclic
+##
+NumberCubefreeCGroups := function(n)
+   if not IsPosInt(n) then
+      Error("NumberCubefreeCGroups: <n> must be a positive integer");
+   fi;
+   if ForAny(Collected(FactorsInt(n)), x-> x[2] > 2) then
+      Error("NumberCubefreeCGroups: <n> must be cubefree");
+   fi;
+   if n = 1 then return 1; fi;
+   return Product(cf_components(n), cf_c_gnu_connected);
+end;
