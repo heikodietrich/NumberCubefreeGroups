@@ -6,8 +6,10 @@
 ### This file implements Theorem 4.11 of the paper
 ###
 ###   The number of groups of cubefree order
+###
 ###   Heiko Dietrich, David Jefferies
 ###   arxiv: https://arxiv.org/abs/2608.18815
+###
 ###
 ### This final implementation has been completely rewritten and improved by the LLM Claude Opus 5.
 ### This implementation has been cross-checked extensively, see Section 6.3.
@@ -24,41 +26,52 @@
 ###    cf_gnu_phi_1(n,l)       gnu_Phi(n,l) if t = v_2(n/l) = 1    Proposition 4.7
 ###    cf_gnu_phi_2(n,l)       gnu_Phi(n,l) if t = v_2(n/l) = 2    Proposition 4.10
 ###
-### The function cf_clearcache() empty the cache of "cf_Udata", see comment below.
+### The function cf_clearcache() empties the four caches used by these functions,
+### see the comment at cf_clearcache.
 ###
-### Section 7 adds the two restricted counts of Remark 4.14,
+### Section 8 adds the two restricted counts of Remark 4.14,
 ###
 ###    NumberCubefreeSolvableGroups(n)        gnu_solv(n)
 ###    NumberCubefreeSupersolvableGroups(n)   gnu_ssolv(n)
 ###
 ### with their own cache, emptied by cf_ss_clearcache().
 ###
-### Section 8 adds the count
+### Section 9 adds the count
 ###
 ###    NumberCubefreeCGroups(n)                gnu_cyc(n)
 ###
 ### of the groups all of whose Sylow subgroups are cyclic; it needs no cache of
-### its own, since it reuses the sets U(p,e,L) of Sections 2 and 5.
+### its own, since it reuses the sets U(p,e,L) of Sections 2 and 6.
 ###
 ### usage:  Read("cubefree-enum.gap");
 ###         NumberCubefreeGroups(2^2*3^2*5^2*7^2);
 ###
 ### Before the sums of Theorem 4.11 are evaluated, n is split by the coprime
 ### reduction of Remark 3.16: the prime divisors of n are the vertices of the
-### interaction graph Gamma(n) (cf_edge, cf_components) and gnu(n) is the product
-### of the gnu(n_C) over the connected components C of Gamma(n). The evaluation of
+### graph Gamma(n) (cf_edge, cf_components) and gnu(n) is the product of the
+### gnu(n_C) over the connected components C of Gamma(n). The evaluation of
 ### Theorem 4.11 itself happens in cf_gnu_connected.
 ###
 ### The functions cf_gnu_phi_t follow the statements of Corollary 3.11 and
 ### Propositions 4.7 and 4.10 line by line, but they evaluate them as described in
-### Section 6.2: the sets U(p,e,L) of (3.2) depend neither on s nor on d
-### or l, so they are computed once and cached (cf_Udata); only the integers
+### Section 6.2 of the paper.  The sets U(p,e,L) of (3.2) depend neither on s nor
+### on d or l, so they are computed once and cached (cf_Udata); only the integers
 ### (j,d,d^+,d^-) attached to a U ever reach the local numbers, so the U with
 ### equal data are merged and counted with a multiplicity; a pair (l,L) whose term
 ### vanishes for a local reason is recognised before any projection tuple is built
 ### (cf_feasible); and the products of Lemmas 3.12, 3.13 and A.1 are accumulated
 ### in a single pass over the columns, with c,z,g,r read off lookup tables
-### (cf_KqtB, cf_KqH).
+### (cf_KqtB, cf_KqH).  The prime factorisations of the socle orders, the sets
+### A(n) of Definition 2.1 and the lookup tables themselves are cached as well,
+### since they are re-derived for every (s,d,l) triple, and there are
+### Sum_{d | Q(n)} tau(n/d) such triples per simple factor.
+###
+### The inner sums over xi in Theta(U), alpha in Aut(E) and psi in Hom(E,Theta(U))
+### of Propositions 4.7 and 4.10 are exponential in the number r of columns with
+### Theta(U) <> 1, although most of their terms vanish.  Section 5 replaces them
+### by a backtracking enumeration of the column characters that enters only the
+### branches which Lemma A.1 does not force to zero; this is the second
+### optimisation described in Section 6.2 of the paper.
 ###
 
 
@@ -92,9 +105,8 @@ end;
 
 #####################################################
 ## input: primes p <> q with p^ep || n and q^eq || n
-## output: true iff p and q are joined in the interaction graph Gamma(n) of
-##         Remark 3.16, that is, iff p | q^i-1 for some i <= eq, or
-##         q | p^j-1 for some j <= ep
+## output: true iff p and q are joined in the graph Gamma(n) of Remark 3.16,
+##         that is, iff p | q^i-1 for some i <= eq, or q | p^j-1 for some j <= ep
 ##
 cf_edge := function(p, ep, q, eq)
    if (q-1) mod p = 0 then return true; fi;
@@ -107,7 +119,7 @@ end;
 #####################################################
 ## input: cubefree n
 ## output: the list of the n_C, where C runs over the connected components of
-##         the interaction graph Gamma(n) and n_C is the C-part of n; the n_C
+##         the graph Gamma(n) and n_C is the C-part of n; the n_C
 ##         are pairwise coprime with product n, and Remark 3.16 gives
 ##         gnu(n) = product of the gnu(n_C).  The components are found by label
 ##         propagation on the (at most 15 for n < 10^18) prime divisors of n.
@@ -164,16 +176,41 @@ end;
 ##         where sylow[k] is [1,1], [2,1] or [2,2] for a Sylow subgroup
 ##         C_q, C_{q^2} or C_q x C_q at the prime q = primes[k]
 ##
+## Cache for Collected(FactorsInt(x)) on the divisors of n: the socle order l
+## and the acting order nu are re-derived for every (s,d,l) triple of
+## Theorem 4.11, so their factorisations are computed once and reused.
+##
+cf_faccache := NewDictionary([1,1], true);;
+
+cf_facs := function(x)
+local v;
+   v := LookupDictionary(cf_faccache, [x]);
+   if not v = fail then return v; fi;
+   v := Collected(FactorsInt(x));
+   AddDictionary(cf_faccache, [x], v);
+   return v;
+end;
+
+## Cache for A(n); the records it returns are read-only for all callers.  The
+## empty case n = 1 is not cached, since the caller would then share one record.
+##
+cf_Acache := NewDictionary([1,1], true);;
+
 cf_A := function(n)
-local facs, res, i, pr;
-   facs := Collected(FactorsInt(n));
+local facs, res, i, pr, v;
+   v := LookupDictionary(cf_Acache, [n]);
+   if not v = fail then return v; fi;
+   facs := cf_facs(n);
    if facs = [[1,1]] then return [ rec(primes:=[], sylow:=[]) ]; fi;   # n = 1
+
    res  := [];
    for i in facs do
       if i[2] = 1 then Add(res, [[1,1]]); else Add(res, [[2,1],[2,2]]); fi;
    od;
    pr  := List(facs, x-> x[1]);
-   return List(Cartesian(res), l-> rec(primes := pr, sylow := l));
+   v   := List(Cartesian(res), l-> rec(primes := pr, sylow := l));
+   AddDictionary(cf_Acache, [n], v);
+   return v;
 end;
 
 # the largest j with C_{q^j} a quotient of the Sylow subgroup given by Lq
@@ -200,12 +237,21 @@ end;
 
 ### The subgroups of D(p)_q are stored as records rec(j,d,gens) of order q^j and
 ### rank d, where gens is a canonical generating set in C_{q^b} x C_{q^b} and q^b
-### is the largest q-power dividing p-1 (capped at q^2); with s = q^(b-1) the
-### shapes are
-###    trivial          gens = [ ]
-###    order q          gens = [ s*[1,k] ], 0<=k<q, or [ [0,s] ]
-###    cyclic, order q^2 gens = [ [1,y] ] or [ [x,1] ] with q | x
-###    C_q x C_q        gens = [ [s,0], [0,s] ]
+### is the largest q-power dividing p-1 (capped at q^2).  The entries of a pair
+### are exponents with respect to a fixed generator zeta of the q-part of F_p^*,
+### so [x,y] denotes diag(zeta^x, zeta^y); in particular [1,y] has a first entry
+### of full order q^b, and the identity in a coordinate is the exponent 0.
+### Replacing a generator by a power of itself with unit exponent does not change
+### the subgroup, so the normal form divides through by whichever coordinate is a
+### unit.  With s = q^(b-1) the shapes are
+###    trivial           gens = [ ]
+###    order q           gens = [ s*[1,k] ], 0<=k<q, or [ [0,s] ]
+###    cyclic, order q^2 gens = [ [1,y] ], 0<=y<q^2, or [ [x,1] ] with q | x
+###    C_q x C_q         gens = [ [s,0], [0,s] ]
+### The two shapes in the third row are the two cases of that division: [1,y] is
+### diag of order q^2 times order dividing q^2, while [x,1] with q | x is diag of
+### order dividing q times order q^2, whose first exponent cannot be scaled to 1.
+### They give q^2 + q = (q^4-q^2)/phi(q^2) subgroups, as they must.
 ### These normal forms are unique, so two subgroups are equal iff their gens are.
 
 # swaps the two coordinates of every generator
@@ -330,8 +376,8 @@ end;
 ## the key is a flat list of integers, with the Sylow data [1,1], [2,1], [2,2]
 ## of L encoded as 3, 5, 6
 ##
-## Section 6.2: U(p,e,L) depends only on (p,e,L) -- not on the simple factor s,
-## the Frattini order d or the socle order l -- and only the record
+## Section 6.2 of the paper: U(p,e,L) depends only on (p,e,L) -- not on the
+## simple factor s, the Frattini order d or the socle order l -- and only the record
 ## rec(theta,typ,delta,loc) of a U is ever used, so equal records are merged.
 ##
 cf_cache := NewDictionary([1,1], true);;
@@ -350,11 +396,20 @@ local val, key, k;
    return val;
 end;
 
-## The cache is sound across different n, since U(p,e,L) does not depend on n,
-## and it keeps paying off in a sweep over many orders.  It does grow; call this
-## to reclaim the memory.
+## the cache for the lookup tables of Section 3, declared here so that
+## cf_clearcache can reach it; it is a plain list indexed by the prime q
+cf_tabcache := [];;
+cf_tabmax   := 100000;;
+
+## None of the four caches depends on n -- U(p,e,L) depends only on (p,e,L), and
+## the other three only on their argument -- so they stay sound across different
+## n and keep paying off in a sweep over many orders.  They do grow; call this to
+## reclaim the memory.
 cf_clearcache := function()
-   cf_cache := NewDictionary([1,1], true);
+   cf_cache    := NewDictionary([1,1], true);
+   cf_faccache := NewDictionary([1,1], true);
+   cf_Acache   := NewDictionary([1,1], true);
+   cf_tabcache := [];
    return;
 end;
 
@@ -363,9 +418,9 @@ end;
 ## output: false if the term of (l,L) vanishes because some prime q dividing |L|
 ##         cannot be realised in any column, true otherwise
 ##
-## Section 6.2: for a column (p,e) the q-part of a projection U is cyclic of
-## order at most q^mj with mj = min(v_q(p-1 resp. p^2-1), largest cyclic quotient
-## of L_q), and it has rank 2 only inside D(p)_q, which needs q | p-1.  Since
+## Section 6.2 of the paper: for a column (p,e) the q-part of a projection U is
+## cyclic of order at most q^mj with mj = min(v_q(p-1 resp. p^2-1), largest cyclic
+## quotient of L_q), and it has rank 2 only inside D(p)_q, which needs q | p-1.  Since
 ## every K_q is isomorphic to L_q and projects onto all these q-parts, L_q must
 ## fit into their product.
 ##
@@ -402,15 +457,23 @@ end;
 
 #####################################################
 ## input: prime q
-## output: the functions g,c,r,z of Section 3.5 as lookup lists indexed by
-##         argument+1, together with the denominators q-1, q(q-1) and |GL_2(q)|
+## output: the functions g,c,r,z of Section 3.5 of the paper as lookup lists
+##         indexed by argument+1, together with the denominators q-1, q(q-1)
+##         and |GL_2(q)|
+##
+## The table depends on q alone but is asked for once per (s,d,l) triple, L and
+## q; the small primes that actually occur are cached in a plain list.
 ##
 cf_tab := function(q)
-   return rec(c  := [1, q-1, 0],
-              z  := [1, 0, 0],
-              g  := [1, q-1, q*(q-1)],
-              r  := [1, q^2-1, (q^2-1)*(q^2-q)],
-              e1 := q-1,  e2 := q*(q-1),  e3 := (q^2-1)*(q^2-q),  q := q);
+local t;
+   if q <= cf_tabmax and IsBound(cf_tabcache[q]) then return cf_tabcache[q]; fi;
+   t := rec(c  := [1, q-1, 0],
+            z  := [1, 0, 0],
+            g  := [1, q-1, q*(q-1)],
+            r  := [1, q^2-1, (q^2-1)*(q^2-q)],
+            e1 := q-1,  e2 := q*(q-1),  e3 := (q^2-1)*(q^2-q),  q := q);
+   if q <= cf_tabmax then cf_tabcache[q] := t; fi;
+   return t;
 end;
 
 #####################################################
@@ -547,12 +610,11 @@ local prod, k;
    return prod;
 end;
 
-# a GF(2)-basis of the span of a list of 0/1 vectors of length m
 
 ######################################################
 ##
 ## 4.  The column numbers A(U;xi,psi) and T(U;P,xi,alpha,psi), and the numbers
-##     h(U;E,xi,alpha,psi):  Lemmas 4.8, A.5 and A.2
+##     A(U;E,xi,alpha,psi):  Lemmas 4.8, A.5 and A.2
 ##
 
 #####################################################
@@ -570,11 +632,14 @@ cf_Atab := function(typ, xi, psi)
    return [1,2,3,4,4,2][typ+1];
 end;
 
-######################################################
+#####################################################
+## The functions varphi_a, varphi_{a+abar}, varphi^-_{a+abar} and rho of
+## Definition A.3, with the values of Lemma A.4 and Table 3.
 ##
-## Table 3 of the paper: P is one of "1", "C2", "C4", "V4"; for P = "C4" the automorphism
-## al = 0 is the identity and al = 1 is inversion, and for P = "V4" the classes
-## al = 0,1,2 are the identity, a transposition and a 3-cycle
+## P is one of "1", "C2", "C4", "V4"; for P = "C4" the automorphism al = 0 is the
+## identity and al = 1 is inversion, and for P = "V4" the classes al = 0,1,2 are
+## the identity, a transposition and a 3-cycle.  The argument delta is the flag
+## Delta_{4 | p-1} stored in the column record.
 ##
 
 cf_phia := function(P, al, delta)       # varphi_a
@@ -637,30 +702,6 @@ cf_T := function(u, P, xi, al, pnz)
 end;
 
 #####################################################
-## input: E = "C4" or "V4", projection tuple prof, xi as a 0/1 vector vx over the
-##        columns, the class al of alpha in Aut(E) (for "V4" together with the
-##        fixed point kk of alpha on the three involutions, or 0 if there is
-##        none), and the images PS of the involutions of E under psi, again as
-##        0/1 vectors over the columns; for E = "C4" the list PS has the single
-##        entry psi(x) for a generator x of E
-## output: h(U;E,xi,alpha,psi) of Lemma A.2
-##
-## The Moebius sum of Lemma A.2 is evaluated once and for all here:
-##
-##   E = C4:  R = 1 contributes the product of the T(U_i;C4,...), and R = C_2
-##            contributes minus the product of the T(U_i;C2,...); the condition
-##            <R>_alpha = C_2 <= ker psi is automatic since Theta(U) has exponent
-##            2, and E/C_2 = C_2 with induced automorphism the identity.  The
-##            subgroup R = C_4 has mu(R) = 0.
-##   E = V4:  R = 1 contributes the product of the T(U_i;V4,...).  An involution
-##            R with <R>_alpha = R contributes minus the product of the
-##            T(U_i;C2,...) if R <= ker psi, and one with <R>_alpha = E
-##            contributes -1 if psi = 1 and 0 otherwise; R = E contributes
-##            +2 if psi = 1 and 0 otherwise.  For alpha of order 2 the two moved
-##            involutions and R = E cancel; for alpha of order 3 all three
-##            involutions are moved, psi = 1 is forced, and the total of the four
-##            proper nontrivial R is -1.
-##
 ## input: the record u of a canonical projection U
 ## output: the numbers T(U;P,xi,alpha,psi) of Lemma A.5 that cf_h needs, as
 ##         tab[xi+1][pnz+1] = [ C2, C4 (al=0,1), V4 (al=0,1,2) ]
@@ -687,6 +728,31 @@ local xi, pn, t;
    return t;
 end;
 
+#####################################################
+## input: E = "C4" or "V4", projection tuple prof, xi as a 0/1 vector vx over the
+##        columns, the class al of alpha in Aut(E) (for "V4" together with the
+##        fixed point kk of alpha on the three involutions, or 0 if there is
+##        none), and the images PS of the involutions of E under psi, again as
+##        0/1 vectors over the columns; for E = "C4" the list PS has the single
+##        entry psi(x) for a generator x of E
+## output: A(U;E,xi,alpha,psi) of Lemma A.2
+##
+## The Moebius sum of Lemma A.2 is evaluated once and for all here:
+##
+##   E = C4:  R = 1 contributes the product of the T(U_i;C4,...), and R = C_2
+##            contributes minus the product of the T(U_i;C2,...); the condition
+##            <R>_alpha = C_2 <= ker psi is automatic since Theta(U) has exponent
+##            2, and E/C_2 = C_2 with induced automorphism the identity.  The
+##            subgroup R = C_4 has mu(R) = 0.
+##   E = V4:  R = 1 contributes the product of the T(U_i;V4,...).  An involution
+##            R with <R>_alpha = R contributes minus the product of the
+##            T(U_i;C2,...) if R <= ker psi, and one with <R>_alpha = E
+##            contributes -1 if psi = 1 and 0 otherwise; R = E contributes
+##            +2 if psi = 1 and 0 otherwise.  For alpha of order 2 the two moved
+##            involutions and R = E cancel; for alpha of order 3 all three
+##            involutions are moved, psi = 1 is forced, and the total of the four
+##            proper nontrivial R is -1.
+##
 cf_h := function(E, tt, vx, al, kk, PS)
 local m, i, j, pn, h, tw, t, allz;
    m := Length(tt);
@@ -722,9 +788,253 @@ local m, i, j, pn, h, tw, t, allz;
 end;
 
 
+
 ######################################################
 ##
-## 5.  The three cases of gnu_Phi(n,l):  Corollary 3.11, Propositions 4.7 and 4.10
+## 5.  Column characters and their enumeration: Lemma A.1 and Section 6.2
+##     of the paper
+##
+## In gnu_Phi(n,l) with t = v_2(n/l) in {1,2} the inner sums run over xi in
+## Theta(U) and psi in Hom(E,Theta(U)).  Both enter the local numbers only
+## through the character lambda_i that the subgroup H = <xi, psi(E)> induces on
+## the i-th column, encoded as an integer:
+##
+##      t = 1:   lambda_i = xi_i + 2 psi_i                in [0..3]
+##      t = 2:   lambda_i = xi_i + 2 psi^1_i + 4 psi^2_i  in [0..7]
+##
+## Columns with Theta(U) = 1 always have lambda_i = 0.  By Lemma A.1 (cf_KqH)
+## the factor |K_q(U,L)^H| is zero as soon as the columns carry, at the prime q,
+## more than two classes, or exactly two while L_q is not C_q x C_q.  The class
+## count is monotone in the set of columns already assigned -- has0 only turns
+## from false to true and the list chs of classes only grows -- so a partial
+## assignment that violates the bound can never be repaired.  The characters can
+## therefore be enumerated by backtracking, and only the branches that survive
+## are entered.  A direct evaluation of the two propositions instead sweeps all
+## 4^r resp. 6*8^r pairs (xi,psi), where r is the number of columns with
+## Theta(U) <> 1, and discovers the zeros only at the leaves; this is what
+## cf_gnu_phi_1_OLD and cf_gnu_phi_2_OLD of Section 10 do.
+##
+## A second saving in the case t = 2: a direct evaluation loops over alpha in
+## Aut(E) outside psi and then skips the psi with psi o alpha <> psi, since
+## A(U;E,xi,alpha,psi) = 0 unless psi o alpha = psi (Lemma A.2).  Here psi is
+## fixed first and only the alpha that stabilise it are visited, which also makes
+## |K(U,L)^H| independent of alpha, so it is computed once per character vector
+## instead of once per pair (alpha,psi).
+##
+## The functions of this section are used by cf_gnu_phi_1 and cf_gnu_phi_2 of
+## Section 6 and by cf_ss_gnu_phi_1 and cf_ss_gnu_phi_2 of Section 8; the
+## restricted counts have psi = 1 throughout, which is expressed by giving the
+## character lambda_i only the two values 0 and 1 (the field NL of the context
+## record below).
+##
+
+## the six elements of Aut(C_2^2) = Sym_3 as permutations of the involutions,
+## with the class al of Table 3 and the fixed involution kk (0 if there is none)
+cf_perms6 := [ [1,2,3], [2,1,3], [3,2,1], [1,3,2], [2,3,1], [3,1,2] ];;
+cf_permAl := [ 0, 1, 1, 1, 2, 2 ];;
+cf_permKk := [ 1, 3, 2, 1, 0, 0 ];;
+
+#####################################################
+## input: projection tuple prof, the columns R with Theta(U) <> 1, the number nq
+##        of primes q | nu_0 and the number m of columns
+## output: [has0, chs], the class data of Lemma A.1 contributed by the columns
+##         outside R, whose character is 0
+##
+cf_lamInit := function(prof, R, nq, m)
+local has0, chs, inR, i, k;
+   has0 := ListWithIdenticalEntries(nq, false);
+   chs  := List([1..nq], k-> []);
+   inR  := BlistList([1..m], R);
+   for i in [1..m] do
+      if inR[i] then continue; fi;
+      for k in [1..nq] do
+         if prof[i].loc[k].d > 0 then has0[k] := true; fi;
+      od;
+   od;
+   return [has0, chs];
+end;
+
+#####################################################
+## input: projection tuple prof, the columns R, the number nq of primes q
+## output: R, ordered so that the columns that create classes at many primes
+##         come first; this only changes the order of the search, not its result,
+##         but it makes the bound of Lemma A.1 bite earlier
+##
+cf_lamOrder := function(prof, R, nq)
+local ord, sc, i, k, s;
+   ord := ShallowCopy(R);
+   sc  := [];
+   for i in R do
+      s := 0;
+      for k in [1..nq] do
+         if prof[i].loc[k].dm > 0 then s := s + 1; fi;
+      od;
+      sc[i] := s;
+   od;
+   Sort(ord, function(a, b) return sc[a] > sc[b]; end);
+   return ord;
+end;
+
+#####################################################
+## input: the depth t and the context record c of cf_lamRec1/cf_lamRec2
+## output: true if the character c.lams[i] can be given to the column i = c.ord[t]
+##         without violating Lemma A.1; the class data c.has0, c.chs are updated
+##         and the previous values are saved in c.ohs[t], c.ols[t]
+##
+## The caller undoes the update with cf_lamUndo after the recursive call.
+##
+cf_lamPush := function(t, c, i, lam)
+local prof, typs, has0, chs, oh, ol, k, u, nch;
+   prof := c.prof;  typs := c.typs;  has0 := c.has0;  chs := c.chs;
+   oh   := c.ohs[t]; ol := c.ols[t];
+   c.kmax[t] := 0;
+   for k in [1..c.nq] do
+      oh[k] := has0[k];  ol[k] := Length(chs[k]);  c.kmax[t] := k;
+      u := prof[i].loc[k];
+      if lam = 0 then
+         if u.d > 0 then has0[k] := true; fi;
+      else
+         if u.dp > 0 then has0[k] := true; fi;
+         if u.dm > 0 and not lam in chs[k] then Add(chs[k], lam); fi;
+      fi;
+      nch := Length(chs[k]);  if has0[k] then nch := nch + 1; fi;
+      if nch > 2 or (nch = 2 and not typs[k] = 3) then return false; fi;
+   od;
+   return true;
+end;
+
+cf_lamUndo := function(t, c)
+local has0, chs, oh, ol, k;
+   has0 := c.has0;  chs := c.chs;  oh := c.ohs[t];  ol := c.ols[t];
+   for k in [1..c.kmax[t]] do
+      has0[k] := oh[k];
+      while Length(chs[k]) > ol[k] do Remove(chs[k]); od;
+   od;
+end;
+
+#####################################################
+## the backtracking for t = 1, Proposition 4.7: at a full character vector the
+## summand is A(U;xi,psi) |K(U,L)^H| / |Theta(U)|, with A of Lemma 4.8 and the
+## correction -1 for psi = 1
+##
+cf_lamRec1 := function(t, c)
+local i, lam, w, A, allz, m, prof;
+   if t > Length(c.ord) then
+      w := cf_KUL(c.prof, c.typs, c.tabs, c.lams, c.bs);
+      if w = 0 then return; fi;
+      m := c.m;  prof := c.prof;  A := 1;  allz := true;
+      for i in [1..m] do
+         A := A * cf_Atab(prof[i].typ, c.vx[i], c.vp[i]);
+         if not c.vp[i] = 0 then allz := false; fi;
+      od;
+      if allz then A := A - 1; fi;                     # - Delta_{psi=1}
+      if not A = 0 then
+         c.acc[1] := c.acc[1] + c.mult * A * w / 2^c.r;
+      fi;
+      return;
+   fi;
+   i := c.ord[t];
+   for lam in [0..c.NL-1] do                          # NL = 4, or 2 if psi = 1
+      if cf_lamPush(t, c, i, lam) then
+         c.lams[i] := lam;
+         c.vx[i]   := lam mod 2;
+         c.vp[i]   := QuoInt(lam, 2);
+         cf_lamRec1(t+1, c);
+      fi;
+      cf_lamUndo(t, c);
+   od;
+   c.lams[i] := 0;  c.vx[i] := 0;  c.vp[i] := 0;
+end;
+
+#####################################################
+## the backtracking for t = 2, Proposition 4.10: at a full character vector
+## |K(U,L)^H| is computed once, and then A(U;E,xi,alpha,psi) of Lemma A.2 for
+## every E in c.Es and every alpha in Aut(E) with psi o alpha = psi.
+##
+## The two isomorphism types E = C_4 and E = C_2^2 need separate searches when
+## psi may be nontrivial, because their characters have different ranges (NL = 4
+## and NL = 8).  When psi = 1, as in Section 8, the range is NL = 2 for both, the
+## search tree is the same, and the two types are handled at the same leaf.
+##
+cf_lamRec2 := function(t, c)
+local i, j, lam, w, h, m, pidx, pi3, PS, al, den;
+   if t > Length(c.ord) then
+      w := cf_KUL(c.prof, c.typs, c.tabs, c.lams, c.bs);
+      if w = 0 then return; fi;
+      m := c.m;
+      for j in [1..Length(c.Es)] do                     # E = Sylow 2-subgroup
+         den := 2^c.r * c.nals[j];                      # |Theta(U)| |Aut(E)|
+         if c.Es[j] = "C4" then
+            for al in [0,1] do                          # alpha in Aut(C_4)
+               h := cf_h("C4", c.tt, c.vx, al, 0, [c.P1]);
+               if not h = 0 then
+                  c.acc[1] := c.acc[1] + c.mult * h * w / den;
+               fi;
+            od;
+         else
+            for i in [1..m] do c.P3[i] := (c.P1[i] + c.P2[i]) mod 2; od;
+            PS := c.PS;
+            for pidx in [1..6] do                       # alpha in Aut(C_2^2)
+               pi3 := cf_perms6[pidx];
+               if PS[pi3[1]] = PS[1] and PS[pi3[2]] = PS[2] and PS[pi3[3]] = PS[3]
+               then
+                  h := cf_h("V4", c.tt, c.vx, cf_permAl[pidx], cf_permKk[pidx], PS);
+                  if not h = 0 then
+                     c.acc[1] := c.acc[1] + c.mult * h * w / den;
+                  fi;
+               fi;
+            od;
+         fi;
+      od;
+      return;
+   fi;
+   i := c.ord[t];
+   for lam in [0..c.NL-1] do                          # NL = 4, 8, or 2 if psi = 1
+      if cf_lamPush(t, c, i, lam) then
+         c.lams[i] := lam;
+         c.vx[i]   := lam mod 2;
+         c.P1[i]   := QuoInt(lam, 2) mod 2;
+         c.P2[i]   := QuoInt(lam, 4) mod 2;
+         cf_lamRec2(t+1, c);
+      fi;
+      cf_lamUndo(t, c);
+   od;
+   c.lams[i] := 0;  c.vx[i] := 0;  c.P1[i] := 0;  c.P2[i] := 0;
+end;
+
+#####################################################
+## the scratch space that cf_lamRec1/cf_lamRec2 walk on; allocated once per
+## projection tuple rather than once per node of the search.  The caller adds
+##
+##   has0, chs   the class data of cf_lamInit
+##   mult        the multiplicity of the projection tuple
+##   NL          the number of admissible characters per column: 4 for t = 1,
+##               4 resp. 8 for t = 2 with E = C_4 resp. E = C_2^2, and 2 if psi
+##               is forced to be trivial, as in Section 8
+##   vp          (t = 1) the 0/1 vector of psi
+##   tt, Es, nals, P1, P2, P3, PS   (t = 2) the tables of cf_Ttab, the list of
+##               isomorphism types E to be handled at a leaf together with their
+##               |Aut(E)|, and the scratch vectors for psi as in cf_h
+##
+## and reads the result off acc[1] when the search is done.
+##
+cf_lamCtx := function(prof, typs, tabs, bs, R, nq, m, r)
+local c;
+   c := rec( prof := prof, typs := typs, tabs := tabs, bs := bs,
+             nq := nq, m := m, r := r,
+             ord  := cf_lamOrder(prof, R, nq),
+             lams := ListWithIdenticalEntries(m, 0),
+             vx   := ListWithIdenticalEntries(m, 0),
+             ohs  := List([1..r+1], x-> ListWithIdenticalEntries(nq, false)),
+             ols  := List([1..r+1], x-> ListWithIdenticalEntries(nq, 0)),
+             kmax := ListWithIdenticalEntries(r+1, 0),
+             acc  := [0] );
+   return c;
+end;
+
+######################################################
+##
+## 6.  The three cases of gnu_Phi(n,l):  Corollary 3.11, Propositions 4.7 and 4.10
 ##
 ## In all three functions n is cubefree, l | n, and nu = n/l = 2^t nu_0 with nu_0
 ## odd; the caller has checked that t = v_2(nu) is 0, 1 or 2, respectively.  The
@@ -744,7 +1054,7 @@ cf_gnu_phi_0 := function(n, l)
 local nu, cols, tot, L, Us, tabs, typs, nq, tup, prof, mult, m, R, r, msk, vx,
       prod, k, bs, it, i;
    nu  := n/l;
-   if l = 1 then cols := []; else cols := Collected(FactorsInt(l)); fi;
+   if l = 1 then cols := []; else cols := cf_facs(l); fi;
    tot := 0;
    for L in cf_A(nu) do                                     # L in A(nu)
       if not cf_feasible(cols, L) then continue; fi;
@@ -783,11 +1093,14 @@ end;
 ## input: cubefree n and a divisor l of n with v_2(n/l) = 1
 ## output: gnu_Phi(n,l), by Proposition 4.7
 ##
+## The pairs (xi,psi) are enumerated as character vectors by cf_lamRec1, see
+## Section 5; cf_gnu_phi_1_OLD of Section 10 evaluates the same sum directly.
+##
 cf_gnu_phi_1 := function(n, l)
-local nu0, cols, tot, L, Us, tabs, typs, nq, tup, prof, mult, m, R, r, vx, vp,
-      A, h, k, it, i, bs, lms, mx, mp;
+local nu0, cols, tot, L, Us, tabs, typs, nq, tup, prof, mult, m, R, r, it, i,
+      bs, st, c;
    nu0 := n/(2*l);
-   if l = 1 then cols := []; else cols := Collected(FactorsInt(l)); fi;
+   if l = 1 then cols := []; else cols := cf_facs(l); fi;
    tot := 0;
    for L in cf_A(nu0) do                                    # L in A(nu_0)
       if not cf_feasible(cols, L) then continue; fi;
@@ -796,31 +1109,22 @@ local nu0, cols, tot, L, Us, tabs, typs, nq, tup, prof, mult, m, R, r, vx, vp,
       typs := List(L.sylow, x-> Position([[1,1],[2,1],[2,2]], x));
       nq   := Length(typs);
       m    := Length(cols);
-      prof := EmptyPlist(m);                                # reused for every tuple
-      it   := IteratorOfCartesianProduct(Us);               # avoids building the
-      while not IsDoneIterator(it) do                       # full list of tuples
+      prof := EmptyPlist(m);
+      it   := IteratorOfCartesianProduct(Us);
+      while not IsDoneIterator(it) do
          tup  := NextIterator(it);                          # U = projection tuple
          mult := 1;
          for i in [1..m] do prof[i] := tup[i][1]; mult := mult * tup[i][2]; od;
          R    := Filtered([1..m], i-> prof[i].theta = 2);
          r    := Length(R);
          bs   := List([1..nq], k-> cf_KqtBase(typs[k], tabs[k], prof, k));
-         vx   := ListWithIdenticalEntries(m, 0);            # reused for every xi
-         vp   := ListWithIdenticalEntries(m, 0);            # reused for every psi
-         lms  := ListWithIdenticalEntries(m, 0);            # column characters
-         for mx in [0..2^r-1] do                            # xi in Theta(U)
-            for k in [1..r] do vx[R[k]] := QuoInt(mx, 2^(k-1)) mod 2; od;
-            for mp in [0..2^r-1] do                         # psi in Theta(U)
-               for k in [1..r] do vp[R[k]] := QuoInt(mp, 2^(k-1)) mod 2; od;
-               A := Product([1..m], i-> cf_Atab(prof[i].typ, vx[i], vp[i]));
-               if mp = 0 then A := A - 1; fi;               # - Delta_{psi=1}
-               if not A = 0 then
-                  for i in [1..m] do lms[i] := vx[i] + 2*vp[i]; od;
-                  h := cf_KUL(prof, typs, tabs, lms, bs);
-                  tot := tot + mult * A * h / 2^r;          # 1/|Theta(U)|
-               fi;
-            od;
-         od;
+         st   := cf_lamInit(prof, R, nq, m);
+         c    := cf_lamCtx(prof, typs, tabs, bs, R, nq, m, r);
+         c.has0 := st[1];  c.chs := st[2];
+         c.vp   := ListWithIdenticalEntries(m, 0);
+         c.mult := mult;   c.NL := 4;                       # lambda = xi + 2 psi
+         cf_lamRec1(1, c);
+         tot := tot + c.acc[1];
       od;
    od;
    return tot;
@@ -830,20 +1134,19 @@ end;
 ## input: cubefree n and a divisor l of n with v_2(n/l) = 2
 ## output: gnu_Phi(n,l), by Proposition 4.10
 ##
-## Aut(C_4) = {identity, inversion} is enumerated by al in [0,1], and
-## Aut(C_2^2) = Sym_3 by its six permutations of the three involutions of E,
-## with al = 0,1,2 the class of a permutation of order 1,2,3 and kk the fixed
-## point of a transposition.  A homomorphism psi in Hom(E,Theta(U)) is given by
-## the images of the involutions of E, each a 0/1 vector over the columns
-## supported on R; for E = C_4 this is the single vector psi(x) for a generator
-## x of E, and for E = C_2^2 the third image is the sum of the other two.
+## The two isomorphism types E = C_4 and E = C_2^2 are treated in turn.  A
+## homomorphism psi in Hom(E,Theta(U)) is given by the images of the involutions
+## of E, each a 0/1 vector over the columns supported on R; for E = C_4 this is
+## the single vector psi(x) for a generator x of E, and for E = C_2^2 the third
+## image is the sum of the other two.  The triples (xi,alpha,psi) are enumerated
+## as character vectors by cf_lamRec2, see Section 5; cf_gnu_phi_2_OLD of
+## Section 10 evaluates the same sum directly.
 ##
 cf_gnu_phi_2 := function(n, l)
-local nu0, cols, tot, perms, L, Us, tabs, typs, nq, tup, prof, mult, m, R, r, E,
-      nal, al, pi3, kk, vx, P1, P2, P3, PS, h, w, k, it, i, bs, tt, lms, mx, mp, j;
+local nu0, cols, tot, L, Us, tabs, typs, nq, tup, prof, mult, m, R, r, it, i,
+      bs, tt, st, c, E;
    nu0 := n/(4*l);
-   if l = 1 then cols := []; else cols := Collected(FactorsInt(l)); fi;
-   perms := [ [1,2,3], [2,1,3], [3,2,1], [1,3,2], [2,3,1], [3,1,2] ];
+   if l = 1 then cols := []; else cols := cf_facs(l); fi;
    tot := 0;
    for L in cf_A(nu0) do                                    # L in A(nu_0)
       if not cf_feasible(cols, L) then continue; fi;
@@ -852,70 +1155,29 @@ local nu0, cols, tot, perms, L, Us, tabs, typs, nq, tup, prof, mult, m, R, r, E,
       typs := List(L.sylow, x-> Position([[1,1],[2,1],[2,2]], x));
       nq   := Length(typs);
       m    := Length(cols);
-      prof := EmptyPlist(m);                                # reused for every tuple
-      it   := IteratorOfCartesianProduct(Us);               # avoids building the
-      while not IsDoneIterator(it) do                       # full list of tuples
+      prof := EmptyPlist(m);
+      it   := IteratorOfCartesianProduct(Us);
+      while not IsDoneIterator(it) do
          tup  := NextIterator(it);                          # U = projection tuple
          mult := 1;
          for i in [1..m] do prof[i] := tup[i][1]; mult := mult * tup[i][2]; od;
          R    := Filtered([1..m], i-> prof[i].theta = 2);
          r    := Length(R);
          bs   := List([1..nq], k-> cf_KqtBase(typs[k], tabs[k], prof, k));
-         tt   := List(prof, cf_Ttab);                       # tables for cf_h
-         lms  := ListWithIdenticalEntries(m, 0);            # column characters
-         vx   := ListWithIdenticalEntries(m, 0);            # reused for every xi
-         P1   := ListWithIdenticalEntries(m, 0);            # reused for every psi
-         P2   := ListWithIdenticalEntries(m, 0);
-         P3   := ListWithIdenticalEntries(m, 0);
-         PS   := [ P1, P2, P3 ];
-
+         tt   := List(prof, cf_Ttab);
          for E in [ "C4", "V4" ] do                         # E = Sylow 2-subgroup
-            if E = "C4" then nal := 2; else nal := 6; fi;   # |Aut(E)|
-            for mx in [0..2^r-1] do                         # xi in Theta(U)
-               for k in [1..r] do vx[R[k]] := QuoInt(mx, 2^(k-1)) mod 2; od;
-
-               if E = "C4" then
-                  for al in [0,1] do                        # alpha in Aut(C_4)
-                     for mp in [0..2^r-1] do                # psi
-                        for k in [1..r] do
-                           P1[R[k]] := QuoInt(mp, 2^(k-1)) mod 2;
-                        od;
-                        h := cf_h("C4", tt, vx, al, 0, [P1]);
-                        if not h = 0 then
-                           for i in [1..m] do lms[i] := vx[i] + 2*P1[i]; od;
-                           w := cf_KUL(prof, typs, tabs, lms, bs);
-                           tot := tot + mult * h * w / (2^r * nal);
-                        fi;
-                     od;
-                  od;
-
-               else
-                  for pi3 in perms do                       # alpha in Aut(C_2^2)
-                     if   pi3 = [1,2,3]                    then al := 0;
-                     elif pi3 in [[2,1,3],[3,2,1],[1,3,2]] then al := 1;
-                                                           else al := 2; fi;
-                     kk := First([1..3], c-> pi3[c] = c);      # fixed involution
-                     if kk = fail then kk := 0; fi;
-                     for mp in [0..4^r-1] do                # psi
-                        for k in [1..r] do
-                           P1[R[k]] := QuoInt(mp, 2^(k-1)) mod 2;
-                           P2[R[k]] := QuoInt(mp, 2^(r+k-1)) mod 2;
-                           P3[R[k]] := (P1[R[k]] + P2[R[k]]) mod 2;
-                        od;
-                        if not ForAll([1..3], j-> PS[pi3[j]] = PS[j])
-                           then continue; fi;                # h = 0 unless psi o alpha = psi
-                        h := cf_h("V4", tt, vx, al, kk, PS);
-                        if not h = 0 then
-                           for i in [1..m] do
-                              lms[i] := vx[i] + 2*P1[i] + 4*P2[i];
-                           od;
-                           w := cf_KUL(prof, typs, tabs, lms, bs);
-                           tot := tot + mult * h * w / (2^r * nal);
-                        fi;
-                     od;
-                  od;
-               fi;
-            od;
+            st := cf_lamInit(prof, R, nq, m);
+            c  := cf_lamCtx(prof, typs, tabs, bs, R, nq, m, r);
+            c.has0 := st[1];  c.chs := st[2];
+            c.tt   := tt;     c.mult := mult;   c.Es := [E];
+            c.P1   := ListWithIdenticalEntries(m, 0);
+            c.P2   := ListWithIdenticalEntries(m, 0);
+            c.P3   := ListWithIdenticalEntries(m, 0);
+            c.PS   := [ c.P1, c.P2, c.P3 ];
+            if E = "C4" then c.nals := [2];  c.NL := 4;   # lambda = xi + 2 psi^1
+                        else c.nals := [6];  c.NL := 8; fi;
+            cf_lamRec2(1, c);
+            tot := tot + c.acc[1];
          od;
       od;
    od;
@@ -925,11 +1187,11 @@ end;
 
 ######################################################
 ##
-## 6.  The main function:  Theorem 4.11
+## 7.  The main function:  Theorem 4.11
 ##
 
 #####################################################
-## input: a cubefree integer n >= 1 whose interaction graph Gamma(n) is connected
+## input: a cubefree integer n >= 1 whose graph Gamma(n) is connected
 ## output: gnu(n), evaluated by the sums of Theorem 4.11
 ##
 cf_gnu_connected := function(n)
@@ -970,21 +1232,27 @@ end;
 
 ######################################################
 ##
-## 7.  Restricted counts: solvable and supersolvable groups, see Remark 4.14
+## 8.  Restricted counts: solvable and supersolvable groups, see Remark 4.14
 ##
 ##    NumberCubefreeSolvableGroups(n)        gnu_solv(n)
 ##    NumberCubefreeSupersolvableGroups(n)   gnu_ssolv(n)
 ##
 ## Both are obtained by restricting the objects that the sums of Theorem 4.11 run
-## over; the functions below are copies of those in Sections 2, 4 and 5 with these
-## restrictions built in, so that Sections 1-6 remain untouched.  Both counts are
-## still multiplicative over the components of Gamma(n): a group is solvable resp.
-## supersolvable if and only if all of its Hall C-subgroups are.
+## over.  Both counts are still multiplicative over the components of Gamma(n):
+## a group is solvable resp. supersolvable if and only if all of its Hall
+## C-subgroups are.
 ##
 ## Solvable: every cubefree group is G = A x L with A trivial or simple and L
-## solvable, so gnu_solv(n) is the summand for s = 1 of the outer sum.
+## solvable, so gnu_solv(n) is the summand for s = 1 of the outer sum.  Nothing
+## else changes, so cf_solv_gnu_connected calls cf_gnu_phi_0/1/2 of Section 6
+## unchanged.
 ##
-## Supersolvable: G is supersolvable if and only if G is solvable and every
+## Supersolvable: the functions below are copies of those in Sections 2, 4 and 6
+## with the restrictions (i)-(iii) described next built in, so that Sections 1-7
+## remain untouched.  The character enumeration of Section 5 is reused unchanged,
+## with the characters restricted to lambda_i in {0,1} because psi = 1, see (ii).
+##
+## Recall that G is supersolvable if and only if G is solvable and every
 ## projection K_i <= GL_{e_i}(p_i) with e_i = 2 of the socle complement K of
 ## G/Phi(G) is reducible.  Write K_i = E_i U_i, where U_i = pi_i(O) is the
 ## projection of the odd part O of K and E_i = pi_i(E) is the projection of the
@@ -1017,7 +1285,7 @@ end;
 ##
 
 #####################################################
-## input: a cubefree integer n >= 1 whose interaction graph Gamma(n) is connected
+## input: a cubefree integer n >= 1 whose graph Gamma(n) is connected
 ## output: gnu_solv(n), the summand for s = 1 of Theorem 4.11
 ##
 cf_solv_gnu_connected := function(n)
@@ -1188,7 +1456,7 @@ cf_ss_gnu_phi_0 := function(n, l)
 local nu, cols, tot, L, Us, tabs, typs, nq, tup, prof, mult, m, R, r, msk, vx,
       prod, k, bs, it, i;
    nu  := n/l;
-   if l = 1 then cols := []; else cols := Collected(FactorsInt(l)); fi;
+   if l = 1 then cols := []; else cols := cf_facs(l); fi;
    tot := 0;
    for L in cf_A(nu) do                                     # L in A(nu)
       if not cf_feasible(cols, L) then continue; fi;
@@ -1229,10 +1497,10 @@ end;
 ##         restricted tuples and with psi = 1, so the sum over psi disappears
 ##
 cf_ss_gnu_phi_1 := function(n, l)
-local nu0, cols, tot, L, Us, tabs, typs, nq, tup, prof, mult, m, R, r, vx,
-      A, h, k, it, i, bs, lms, mx;
+local nu0, cols, tot, L, Us, tabs, typs, nq, tup, prof, mult, m, R, r, it, i,
+      bs, st, c;
    nu0 := n/(2*l);
-   if l = 1 then cols := []; else cols := Collected(FactorsInt(l)); fi;
+   if l = 1 then cols := []; else cols := cf_facs(l); fi;
    tot := 0;
    for L in cf_A(nu0) do                                    # L in A(nu_0)
       if not cf_feasible(cols, L) then continue; fi;
@@ -1244,23 +1512,19 @@ local nu0, cols, tot, L, Us, tabs, typs, nq, tup, prof, mult, m, R, r, vx,
       prof := EmptyPlist(m);
       it   := IteratorOfCartesianProduct(Us);
       while not IsDoneIterator(it) do
-         tup  := NextIterator(it);
+         tup  := NextIterator(it);                          # U = projection tuple
          mult := 1;
          for i in [1..m] do prof[i] := tup[i][1]; mult := mult * tup[i][2]; od;
          R    := Filtered([1..m], i-> prof[i].theta = 2);
          r    := Length(R);
          bs   := List([1..nq], k-> cf_KqtBase(typs[k], tabs[k], prof, k));
-         vx   := ListWithIdenticalEntries(m, 0);            # reused for every xi
-         lms  := ListWithIdenticalEntries(m, 0);            # column characters
-         for mx in [0..2^r-1] do                            # xi in Theta(U)
-            for k in [1..r] do vx[R[k]] := QuoInt(mx, 2^(k-1)) mod 2; od;
-            A := Product([1..m], i-> cf_Atab(prof[i].typ, vx[i], 0)) - 1;
-            if not A = 0 then                               # psi = 1, - Delta_{psi=1}
-               for i in [1..m] do lms[i] := vx[i]; od;
-               h := cf_KUL(prof, typs, tabs, lms, bs);
-               tot := tot + mult * A * h / 2^r;             # 1/|Theta(U)|
-            fi;
-         od;
+         st   := cf_lamInit(prof, R, nq, m);
+         c    := cf_lamCtx(prof, typs, tabs, bs, R, nq, m, r);
+         c.has0 := st[1];  c.chs := st[2];
+         c.vp   := ListWithIdenticalEntries(m, 0);          # psi = 1 throughout
+         c.mult := mult;   c.NL := 2;                       # lambda = xi
+         cf_lamRec1(1, c);
+         tot := tot + c.acc[1];
       od;
    od;
    return tot;
@@ -1273,11 +1537,10 @@ end;
 ##         with the tables cf_ss_Ttab, which impose condition (iii)
 ##
 cf_ss_gnu_phi_2 := function(n, l)
-local nu0, cols, tot, perms, L, Us, tabs, typs, nq, tup, prof, mult, m, R, r, E,
-      nal, al, pi3, kk, vx, P1, P2, P3, PS, h, w, k, it, i, bs, tt, lms, mx;
+local nu0, cols, tot, L, Us, tabs, typs, nq, tup, prof, mult, m, R, r, it, i,
+      bs, tt, st, c;
    nu0 := n/(4*l);
-   if l = 1 then cols := []; else cols := Collected(FactorsInt(l)); fi;
-   perms := [ [1,2,3], [2,1,3], [3,2,1], [1,3,2], [2,3,1], [3,1,2] ];
+   if l = 1 then cols := []; else cols := cf_facs(l); fi;
    tot := 0;
    for L in cf_A(nu0) do                                    # L in A(nu_0)
       if not cf_feasible(cols, L) then continue; fi;
@@ -1289,59 +1552,32 @@ local nu0, cols, tot, perms, L, Us, tabs, typs, nq, tup, prof, mult, m, R, r, E,
       prof := EmptyPlist(m);
       it   := IteratorOfCartesianProduct(Us);
       while not IsDoneIterator(it) do
-         tup  := NextIterator(it);
+         tup  := NextIterator(it);                          # U = projection tuple
          mult := 1;
          for i in [1..m] do prof[i] := tup[i][1]; mult := mult * tup[i][2]; od;
          R    := Filtered([1..m], i-> prof[i].theta = 2);
          r    := Length(R);
          bs   := List([1..nq], k-> cf_KqtBase(typs[k], tabs[k], prof, k));
          tt   := List(prof, cf_ss_Ttab);                    # tables for cf_h
-         lms  := ListWithIdenticalEntries(m, 0);            # column characters
-         vx   := ListWithIdenticalEntries(m, 0);            # reused for every xi
-         P1   := ListWithIdenticalEntries(m, 0);            # psi = 1 throughout
-         P2   := ListWithIdenticalEntries(m, 0);
-         P3   := ListWithIdenticalEntries(m, 0);
-         PS   := [ P1, P2, P3 ];
-
-         for E in [ "C4", "V4" ] do                         # E = Sylow 2-subgroup
-            if E = "C4" then nal := 2; else nal := 6; fi;   # |Aut(E)|
-            for mx in [0..2^r-1] do                         # xi in Theta(U)
-               for k in [1..r] do vx[R[k]] := QuoInt(mx, 2^(k-1)) mod 2; od;
-               for i in [1..m] do lms[i] := vx[i]; od;      # psi = 1
-
-               if E = "C4" then
-                  for al in [0,1] do                        # alpha in Aut(C_4)
-                     h := cf_h("C4", tt, vx, al, 0, [P1]);
-                     if not h = 0 then
-                        w := cf_KUL(prof, typs, tabs, lms, bs);
-                        tot := tot + mult * h * w / (2^r * nal);
-                     fi;
-                  od;
-
-               else
-                  for pi3 in perms do                       # alpha in Aut(C_2^2)
-                     if   pi3 = [1,2,3]                    then al := 0;
-                     elif pi3 in [[2,1,3],[3,2,1],[1,3,2]] then al := 1;
-                                                           else al := 2; fi;
-                     kk := First([1..3], c-> pi3[c] = c);   # fixed involution
-                     if kk = fail then kk := 0; fi;
-                     ## psi = 1 satisfies psi o alpha = psi for every alpha
-                     h := cf_h("V4", tt, vx, al, kk, PS);
-                     if not h = 0 then
-                        w := cf_KUL(prof, typs, tabs, lms, bs);
-                        tot := tot + mult * h * w / (2^r * nal);
-                     fi;
-                  od;
-               fi;
-            od;
-         od;
+         st   := cf_lamInit(prof, R, nq, m);
+         c    := cf_lamCtx(prof, typs, tabs, bs, R, nq, m, r);
+         c.has0 := st[1];  c.chs := st[2];
+         c.tt   := tt;     c.mult := mult;
+         c.Es   := [ "C4", "V4" ];   c.nals := [2, 6];      # E = Sylow 2-subgroup
+         c.P1   := ListWithIdenticalEntries(m, 0);          # psi = 1 throughout
+         c.P2   := ListWithIdenticalEntries(m, 0);
+         c.P3   := ListWithIdenticalEntries(m, 0);
+         c.PS   := [ c.P1, c.P2, c.P3 ];
+         c.NL   := 2;                                       # lambda = xi
+         cf_lamRec2(1, c);
+         tot := tot + c.acc[1];
       od;
    od;
    return tot;
 end;
 
 #####################################################
-## input: a cubefree integer n >= 1 whose interaction graph Gamma(n) is connected
+## input: a cubefree integer n >= 1 whose graph Gamma(n) is connected
 ## output: gnu_ssolv(n), evaluated by the restricted sums of Theorem 4.11
 ##
 cf_ss_gnu_connected := function(n)
@@ -1377,14 +1613,14 @@ end;
 
 ######################################################
 ##
-## 8.  Restricted count: groups with cyclic Sylow subgroups
+## 9.  Restricted count: groups with cyclic Sylow subgroups
 ##
 ##    NumberCubefreeCGroups(n)   gnu_cyc(n)
 ##
 ## A group all of whose Sylow subgroups are cyclic is a C-group (also called a
 ## Z-group); by Hoelder, Burnside and Zassenhaus such a group is metacyclic, in
-## particular solvable.  As in Section 7 the count is obtained by restricting the
-## objects that the sums of Theorem 4.11 run over, so that Sections 1-7 remain
+## particular solvable.  As in Section 8 the count is obtained by restricting the
+## objects that the sums of Theorem 4.11 run over, so that Sections 1-8 remain
 ## untouched.  It is again multiplicative over the components of Gamma(n), since
 ## a direct product of groups of coprime orders is a C-group if and only if all
 ## of its factors are.
@@ -1427,7 +1663,7 @@ end;
 ## No further restriction of the sets U(p,e,L) is needed, and no new cache: by (b)
 ## every column has e_i = 1, so every U in U(p,1,L) has Theta(U) = 1 and column
 ## type (1), or type (0) for p = 2.  The loops over Theta(U) below are kept as in
-## Sections 5 and 7; they simply run over the trivial group.
+## Sections 6 and 8; they simply run over the trivial group.
 ##
 
 #####################################################
@@ -1590,7 +1826,7 @@ local nu0, cols, tot, L, Us, tabs, typs, nq, tup, prof, mult, m, R, r,
 end;
 
 #####################################################
-## input: a cubefree integer n >= 1 whose interaction graph Gamma(n) is connected
+## input: a cubefree integer n >= 1 whose graph Gamma(n) is connected
 ## output: gnu_cyc(n), evaluated by the restricted sums of Theorem 4.11: the
 ##         summand s = 1, and only the socle orders l that are squarefree and
 ##         coprime to the order nu = n/(d*l) of the socle complement
@@ -1627,3 +1863,4 @@ NumberCubefreeCGroups := function(n)
    if n = 1 then return 1; fi;
    return Product(cf_components(n), cf_c_gnu_connected);
 end;
+
